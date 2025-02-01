@@ -19,15 +19,12 @@ const HEADERS = {
     'sec-fetch-mode': 'cors',
     'sec-fetch-site': 'same-origin',
     'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-    'cookie': process.env.COOKIE,
+    'cookie': process.env.FETCH_COOKIE,
 };
 
 function dateToTimestamp(dateString) {
     return Math.floor(new Date(dateString).getTime() / 1000);
 }
-
-const FILTER_SINCE = dateToTimestamp(process.env.FILTER_SINCE);
-const FILTER_UNTIL = dateToTimestamp(process.env.FILTER_UNTIL);
 
 async function fetchArticles(filterSince, filterUntil) {
     try {
@@ -36,11 +33,11 @@ async function fetchArticles(filterSince, filterUntil) {
             params: {
                 'fields[article]': 'structuredInsights,publishOn,author,commentCount,title,primaryTickers,secondaryTickers,summary,isRead,sentiments',
                 'filter[category]': CATEGORY,
-                'filter[since]': 0,
+                'filter[since]': filterSince,
                 'filter[until]': filterUntil,
                 'include': 'author,primaryTickers,secondaryTickers,sentiments',
                 'isMounting': true,
-                'page[size]': 20,
+                'page[size]': 50,
                 'page[number]': 1,
             },
         });
@@ -131,7 +128,7 @@ async function fetchAllData() {
         }
 
         // Random sleep between 0 to 8 seconds
-        const sleepTime = Math.floor(Math.random() * (8000 + 1));
+        const sleepTime = Math.floor(Math.random() * (process.env.FETCH_INTERVAL + 1));
         console.log(`Sleeping for ${sleepTime / 1000} seconds...`);
         await sleep(sleepTime);
     }
