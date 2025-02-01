@@ -10,9 +10,8 @@ const OUTPUT_DIR = path.join(__dirname, 'data', CATEGORY);
 const HEADERS = {
     'accept': 'application/json',
     'accept-language': 'en-US,en;q=0.9,zh-TW;q=0.8,zh;q=0.7',
-    'cookie': process.env.COOKIE,
     'priority': 'u=1, i',
-    'referer': 'https://seekingalpha.com/ai-tech-stocks',
+    'referer': 'https://seekingalpha.com/latest-articles',
     'sec-ch-ua': '"Not A(Brand";v="8", "Chromium";v="132", "Google Chrome";v="132"',
     'sec-ch-ua-mobile': '?0',
     'sec-ch-ua-platform': '"macOS"',
@@ -20,6 +19,7 @@ const HEADERS = {
     'sec-fetch-mode': 'cors',
     'sec-fetch-site': 'same-origin',
     'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+    'cookie': process.env.COOKIE,
 };
 
 function dateToTimestamp(dateString) {
@@ -29,25 +29,25 @@ function dateToTimestamp(dateString) {
 const FILTER_SINCE = dateToTimestamp(process.env.FILTER_SINCE);
 const FILTER_UNTIL = dateToTimestamp(process.env.FILTER_UNTIL);
 
-async function fetchPage(filterSince, filterUntil, pageSize, pageNumber) {
+async function fetchArticles(filterSince, filterUntil) {
     try {
         const response = await axios.get('https://seekingalpha.com/api/v3/articles', {
             headers: HEADERS,
             params: {
                 'fields[article]': 'structuredInsights,publishOn,author,commentCount,title,primaryTickers,secondaryTickers,summary,isRead,sentiments',
                 'filter[category]': CATEGORY,
-                'filter[since]': filterSince,
+                'filter[since]': 0,
                 'filter[until]': filterUntil,
                 'include': 'author,primaryTickers,secondaryTickers,sentiments',
                 'isMounting': true,
-                'page[size]': pageSize,
-                'page[number]': pageNumber,
+                'page[size]': 20,
+                'page[number]': 1,
             },
         });
 
         return response.data;
     } catch (error) {
-        console.error(`Error fetching page ${pageNumber}:`, error.message);
+        console.error(`Error fetching data ${filterSince}~${filterUntil}:`, error.message);
         if (error.response) {
             console.error(`Status: ${error.response.status}`);
             console.error(`Headers: ${JSON.stringify(error.response.headers)}`);
@@ -61,62 +61,81 @@ async function fetchPage(filterSince, filterUntil, pageSize, pageNumber) {
     }
 }
 
-async function saveToFile(pageNumber, data) {
+function getEarliestFile() {
+    ;
+    if (!fs.existsSync(OUTPUT_DIR)) {
+        return null;
+    }
+
+    // Sort in ascending order
+    const files = fs.readdirSync(OUTPUT_DIR).sort((a, b) => a - b);
+
+    return files.length > 0 ? files[0] : null;
+}
+
+async function saveToFile(filterSince, data) {
     try {
         if (!fs.existsSync(OUTPUT_DIR)) {
             fs.mkdirSync(OUTPUT_DIR, { recursive: true });
         }
-        
-        const paddedPageNumber = pageNumber.toString().padStart(4, '0');
-        const filePath = path.join(OUTPUT_DIR, `category-${paddedPageNumber}.json`);
-        
+
+        const filePath = path.join(OUTPUT_DIR, `category-${filterSince}.json`);
+
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-        console.log(`Saved page ${paddedPageNumber} to ${filePath}`);
+        console.log(`Saved page ${filterSince} to ${filePath}`);
     } catch (error) {
-        console.error(`Error saving page ${pageNumber}:`, error.message);
+        console.error(`Error saving page ${filterSince}:`, error.message);
     }
 }
 
-async function fetchAllPages() {
-    const PAGE_SIZE = 20;
+async function fetchAllData() {
+    const filterSince = dateToTimestamp(process.env.FILTER_SINCE);
+    let filterUntil = dateToTimestamp(process.env.FILTER_UNTIL);
 
-    let page = 1;
-    let totalPages = Infinity;
+    let earliestFile = getEarliestFile();
+    if (earliestFile) {
+        let data = require(path.join(OUTPUT_DIR, earliestFile));
 
-    while (page <= totalPages) {
-        const paddedPageNumber = page.toString().padStart(4, '0');
-        const filePath = path.join(OUTPUT_DIR, `category-${paddedPageNumber}.json`);
-        
-        if (fs.existsSync(filePath)) {
-            console.log(`File already exists for page ${page}, skipping...`);
-        } else {
-            console.log(`Fetching page ${page}...`);
-            const data = await fetchPage(FILTER_SINCE, FILTER_UNTIL, PAGE_SIZE, page);
-            
-            if (!data || !data.data || data.data.length === 0) {
-                console.log(`No more data found. Stopping at page ${page}.`);
-                break;
-            }
-            
-            await saveToFile(page, data);
-    
-            if (totalPages == Infinity) {
-                if (data.meta && data.meta.page && data.meta.page.totalPages) {
-                    totalPages = data.meta.page.totalPages;
-                    console.log(`Total page is ${totalPages}.`);
-                } else {
-                    throw new Error('Unable to retrieve totalPages from response meta data');
-                }
-            }
-    
-            // Random sleep between 0 to 20 seconds
-            const sleepTime = Math.floor(Math.random() * (20000 + 1));
-            console.log(`Sleeping for ${sleepTime / 1000} seconds...`);
-            await sleep(sleepTime);
+        filterUntil = data.meta.page.minmaxPublishOn.min;
+        console.log(`Update filterUntil from files ${filterUntil}`);
+    }
+
+    while (true) {
+        console.log(`Fetching data earlier than ${filterUntil}...`);
+
+        const data = await fetchArticles(filterSince, filterUntil);
+
+        if (!data || !data.data || data.data.length === 0) {
+            console.log(`No more data found. Stopping fetch.`);
+            break;
         }
 
-        page++;
+        await saveToFile(filterUntil, data);
+
+        // Update filterSince with the publish time of the last article
+        if (
+            data.meta &&
+            data.meta.page &&
+            data.meta.page.minmaxPublishOn &&
+            data.meta.page.minmaxPublishOn.min
+        ) {
+            filterUntil = data.meta.page.minmaxPublishOn.min;
+        } else {
+            console.error('Unable to retrieve publishOn timestamp from last article, stopping fetch.');
+            break;
+        }
+
+        if (filterUntil < filterSince) {
+            console.error('filterUntil less than filterSince, break');
+            break;
+        }
+
+        // Random sleep between 0 to 8 seconds
+        const sleepTime = Math.floor(Math.random() * (8000 + 1));
+        console.log(`Sleeping for ${sleepTime / 1000} seconds...`);
+        await sleep(sleepTime);
     }
 }
 
-fetchAllPages().then(() => console.log('Finished fetching all pages.'));
+
+fetchAllData().then(() => console.log('Finished fetching all articles.'));
