@@ -48,6 +48,15 @@ async function fetchPage(filterSince, filterUntil, pageSize, pageNumber) {
         return response.data;
     } catch (error) {
         console.error(`Error fetching page ${pageNumber}:`, error.message);
+        if (error.response) {
+            console.error(`Status: ${error.response.status}`);
+            console.error(`Headers: ${JSON.stringify(error.response.headers)}`);
+            console.error(`Data: ${JSON.stringify(error.response.data)}`);
+        } else if (error.request) {
+            console.error('No response received:', error.request);
+        } else {
+            console.error('Request error:', error.message);
+        }
         return null;
     }
 }
@@ -60,11 +69,6 @@ async function saveToFile(pageNumber, data) {
         
         const paddedPageNumber = pageNumber.toString().padStart(4, '0');
         const filePath = path.join(OUTPUT_DIR, `category-${paddedPageNumber}.json`);
-        
-        if (fs.existsSync(filePath)) {
-            console.log(`File already exists for page ${paddedPageNumber}, skipping...`);
-            return;
-        }
         
         fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
         console.log(`Saved page ${paddedPageNumber} to ${filePath}`);
@@ -83,7 +87,9 @@ async function fetchAllPages() {
         const paddedPageNumber = page.toString().padStart(4, '0');
         const filePath = path.join(OUTPUT_DIR, `category-${paddedPageNumber}.json`);
         
-        if (!fs.existsSync(filePath)) {
+        if (fs.existsSync(filePath)) {
+            console.log(`File already exists for page ${page}, skipping...`);
+        } else {
             console.log(`Fetching page ${page}...`);
             const data = await fetchPage(FILTER_SINCE, FILTER_UNTIL, PAGE_SIZE, page);
             
@@ -94,10 +100,13 @@ async function fetchAllPages() {
             
             await saveToFile(page, data);
     
-            if (data.meta && data.meta.page && data.meta.page.totalPages) {
-                totalPages = data.meta.page.totalPages;
-            } else {
-                throw new Error('Unable to retrieve totalPages from response meta data');
+            if (totalPages == Infinity) {
+                if (data.meta && data.meta.page && data.meta.page.totalPages) {
+                    totalPages = data.meta.page.totalPages;
+                    console.log(`Total page is ${totalPages}.`);
+                } else {
+                    throw new Error('Unable to retrieve totalPages from response meta data');
+                }
             }
     
             // Random sleep between 0 to 20 seconds
