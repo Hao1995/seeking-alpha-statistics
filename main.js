@@ -37,14 +37,14 @@ async function fetchArticles(filterSince, filterUntil) {
                 'filter[until]': filterUntil,
                 'include': 'author,primaryTickers,secondaryTickers,sentiments',
                 'isMounting': true,
-                'page[size]': 50,
+                'page[size]': process.env.FETCH_PAGE_SIZE,
                 'page[number]': 1,
             },
         });
 
         return response.data;
     } catch (error) {
-        console.error(`Error fetching data ${filterSince}~${filterUntil}:`, error.message);
+        console.error(`Error fetching data ${filterSince} ~ ${filterUntil}`);
         if (error.response) {
             console.error(`Status: ${error.response.status}`);
             console.error(`Headers: ${JSON.stringify(error.response.headers)}`);
@@ -54,18 +54,17 @@ async function fetchArticles(filterSince, filterUntil) {
         } else {
             console.error('Request error:', error.message);
         }
-        return null;
+        throw new Error('Fetching data failed');
     }
 }
 
 function getEarliestFile() {
-    ;
     if (!fs.existsSync(OUTPUT_DIR)) {
         return null;
     }
 
     // Sort in ascending order
-    const files = fs.readdirSync(OUTPUT_DIR).sort((a, b) => a - b);
+    const files = fs.readdirSync(OUTPUT_DIR).sort();
 
     return files.length > 0 ? files[0] : null;
 }
@@ -82,12 +81,13 @@ async function saveToFile(filterSince, data) {
         console.log(`Saved page ${filterSince} to ${filePath}`);
     } catch (error) {
         console.error(`Error saving page ${filterSince}:`, error.message);
+        throw new Error('Saving data failed');
     }
 }
 
 async function fetchAllData() {
-    const filterSince = dateToTimestamp(process.env.FILTER_SINCE);
-    let filterUntil = dateToTimestamp(process.env.FILTER_UNTIL);
+    let filterSince = dateToTimestamp(process.env.FETCH_FILTER_SINCE);
+    let filterUntil = dateToTimestamp(process.env.FETCH_FILTER_UNTIL);
 
     let earliestFile = getEarliestFile();
     if (earliestFile) {
@@ -119,12 +119,7 @@ async function fetchAllData() {
             filterUntil = data.meta.page.minmaxPublishOn.min;
         } else {
             console.error('Unable to retrieve publishOn timestamp from last article, stopping fetch.');
-            break;
-        }
-
-        if (filterUntil < filterSince) {
-            console.error('filterUntil less than filterSince, break');
-            break;
+            throw new Error('Fetching process failed due to missing timestamp');
         }
 
         // Random sleep between 0 to 8 seconds
@@ -134,5 +129,6 @@ async function fetchAllData() {
     }
 }
 
-
-fetchAllData().then(() => console.log('Finished fetching all articles.'));
+fetchAllData()
+    .then(() => console.log('Finished fetching all articles.'))
+    .catch(error => console.error(`Process terminated with error: ${error.message}`));
